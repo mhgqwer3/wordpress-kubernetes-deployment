@@ -1,6 +1,6 @@
 # WordPress + MySQL Kubernetes Deployment
 
-This project contains Kubernetes manifests for deploying a WordPress application with MySQL database using ClusterIP services.
+This project contains Kubernetes manifests for deploying a WordPress application with MySQL database using LoadBalancer services for external access.
 
 ## Architecture Overview
 
@@ -8,42 +8,44 @@ The deployment consists of the following components:
 
 1. **MySQL Database**
    - Deployment: `mysql-app`
-   - Service: `mysql-service` (ClusterIP)
-   - PVC: `mysql-pvc`
-   - Secret: `mysql-secret`
+   - Service: `mysql-svc` (ClusterIP - internal only)
+   - PVC: `mysql-pvc` (5Gi EBS storage)
+   - Secret: `mysql-secret` (root password)
 
 2. **WordPress Application**
    - Deployment: `wordpress-app`
-   - Service: `wordpress-service` (ClusterIP)
-   - PVC: `wordpress-pvc`
+   - Service: `wordpress-svc` (LoadBalancer - external access)
+   - PVC: `wordpress-efs-pvc` (5Gi EFS storage)
+   - Image: `wordpress:6.4-apache`
 
-3. **Storage**
-   - StorageClass: `mysql-sc`
+3. **Storage Classes**
+   - `mysql-sc`: EBS CSI driver for MySQL (ReadWriteOnce)
+   - `efs-sc`: EFS CSI driver for WordPress (ReadWriteMany)
 
 ## Service Connections
 
 ### MySQL Service
-- **Name**: `mysql-service`
-- **Type**: ClusterIP
+- **Name**: `mysql-svc`
+- **Type**: ClusterIP (internal cluster access only)
 - **Port**: 3306
 - **Selector**: `app: wordpress, tier: mysql`
 - **Purpose**: Provides internal database access to WordPress pods
 
 ### WordPress Service
-- **Name**: `wordpress-service`
-- **Type**: ClusterIP
+- **Name**: `wordpress-svc`
+- **Type**: LoadBalancer (external access)
 - **Port**: 80
 - **Selector**: `app: wordpress, tier: frontend`
-- **Purpose**: Provides internal web access to WordPress pods
+- **Purpose**: Provides external web access to WordPress application
 
 ### Connection Flow
 ```
-WordPress Pod → mysql-service:3306 → MySQL Pod
+External Users → LoadBalancer → WordPress Pod → mysql-svc:3306 → MySQL Pod
 ```
 
 The WordPress deployment connects to MySQL using the environment variable:
 ```yaml
-WORDPRESS_DB_HOST: mysql-service:3306
+WORDPRESS_DB_HOST: mysql-svc:3306
 ```
 
 ## Deployment Options
@@ -79,18 +81,32 @@ kubectl get pvc
 
 ## Accessing WordPress
 
-Since we're using ClusterIP services, WordPress is only accessible within the cluster. To access it externally, you would need to:
+The WordPress application is accessible externally through the LoadBalancer service:
 
-1. Create a NodePort or LoadBalancer service
-2. Use port-forwarding: `kubectl port-forward service/wordpress-service 8080:80`
-3. Access via: `http://localhost:8080`
+1. **External Access**: The LoadBalancer will provide an external IP address
+2. **Check LoadBalancer IP**: `kubectl get service wordpress-svc`
+3. **Access WordPress**: `http://EXTERNAL-IP` (replace EXTERNAL-IP with the actual IP)
+
+### Alternative Access Methods:
+- **Port Forwarding**: `kubectl port-forward service/wordpress-svc 8080:80`
+- **Access via**: `http://localhost:8080`
 
 ## Files Structure
 
-- `deploy-all.yaml` - Complete deployment with all components
-- `deployment.yaml` - MySQL deployment (fixed syntax errors)
+- `deploy-all.yaml` - Complete deployment with all components (RECOMMENDED)
+- `deployment.yaml` - MySQL deployment
 - `wordpress-deployment.yaml` - WordPress deployment
-- `services.yaml` - Both ClusterIP services
-- `PVC.yaml` - Persistent Volume Claims for both apps
+- `services.yaml` - MySQL ClusterIP service
+- `wordpress-services.yaml` - WordPress LoadBalancer service
+- `PVC.yaml` - MySQL Persistent Volume Claim
+- `wordpress-pvc.yaml` - WordPress Persistent Volume Claim
+- `wordpress-pv.yaml` - WordPress Persistent Volume
 - `mysql-secret.yaml` - Database credentials
-- `SC.yaml` - Storage Class configuration
+- `SC.yaml` - MySQL Storage Class (EBS)
+- `wordpress/sc.yaml` - WordPress Storage Class (EFS)
+
+## Prerequisites
+
+- Kubernetes cluster (EKS, GKE, AKS, or local)
+- AWS EBS and EFS CSI drivers installed
+- kubectl configured to access your cluster
